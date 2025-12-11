@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P WebGPU Diffusion - Distributed Image Generation</title>
+    <style>
+        :root {
+            --primary-color: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --success-color: #22c55e;
+            --warning-color: #f59e0b;
+            --error-color: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        header p {
+            color: var(--text-muted);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-indicator.connected {
+            background: var(--success-color);
+            box-shadow: 0 0 10px var(--success-color);
+        }
+
+        .status-indicator.disconnected {
+            background: var(--error-color);
+        }
+
+        .status-indicator.connecting {
+            background: var(--warning-color);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        input[type="text"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 1rem;
+        }
+
+        input[type="text"]:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            width: 100%;
+        }
+
+        button:hover:not(:disabled) {
+            background: var(--primary-hover);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: transparent;
+            border: 1px solid var(--border-color);
+        }
+
+        button.secondary:hover:not(:disabled) {
+            background: var(--card-bg);
+        }
+
+        .peers-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .peer-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            background: var(--bg-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .peer-item .peer-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .peer-item .peer-status {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            background: var(--success-color);
+            color: white;
+        }
+
+        .peer-item .peer-status.working {
+            background: var(--warning-color);
+        }
+
+        .progress-container {
+            margin-top: 1rem;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), #a855f7);
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+
+        .progress-text {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .canvas-container {
+            position: relative;
+            background: var(--bg-color);
+            border-radius: 0.5rem;
+            overflow: hidden;
+            aspect-ratio: 1;
+        }
+
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .queue-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .queue-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            background: var(--bg-color);
+            border-radius: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .queue-item .queue-number {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--primary-color);
+            border-radius: 50%;
+            font-size: 0.875rem;
+            font-weight: bold;
+        }
+
+        .queue-item .queue-prompt {
+            flex: 1;
+            font-size: 0.875rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .queue-item .queue-status {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .log-container {
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--bg-color);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: monospace;
+            font-size: 0.875rem;
+        }
+
+        .log-entry {
+            margin-bottom: 0.25rem;
+        }
+
+        .log-entry.info {
+            color: var(--text-muted);
+        }
+
+        .log-entry.success {
+            color: var(--success-color);
+        }
+
+        .log-entry.warning {
+            color: var(--warning-color);
+        }
+
+        .log-entry.error {
+            color: var(--error-color);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 1rem;
+            background: var(--bg-color);
+            border-radius: 0.5rem;
+        }
+
+        .stat-item .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-item .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .room-input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .room-input-group input {
+            flex: 1;
+        }
+
+        .room-input-group button {
+            width: auto;
+        }
+
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+        }
+
+        .tooltip .tooltip-text {
+            visibility: hidden;
+            width: 200px;
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            text-align: center;
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 0.75rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .backend-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            background: var(--bg-color);
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .backend-status.available {
+            border-left: 3px solid var(--success-color);
+        }
+
+        .backend-status.unavailable {
+            border-left: 3px solid var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌐 P2P WebGPU Diffusion</h1>
+            <p>Distributed AI Image Generation powered by Trystero</p>
+        </header>
+
+        <div class="grid">
+            <!-- Left Column: Network & Controls -->
+            <div class="left-column">
+                <!-- Network Status Card -->
+                <div class="card" style="margin-bottom: 1rem;">
+                    <h2>
+                        <span class="status-indicator disconnected" id="networkStatus"></span>
+                        Network Status
+                    </h2>
+                    
+                    <div class="backend-status unavailable" id="backendStatus">
+                        <span>🖥️ Backend:</span>
+                        <span id="backendStatusText">Checking...</span>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="peerCount">0</div>
+                            <div class="stat-label">Peers</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="gpuWorkers">0</div>
+                            <div class="stat-label">GPU Workers</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="queueLength">0</div>
+                            <div class="stat-label">In Queue</div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Room ID 
+                            <span class="tooltip">ℹ️
+                                <span class="tooltip-text">Share this ID with others to collaborate on image generation</span>
+                            </span>
+                        </label>
+                        <div class="room-input-group">
+                            <input type="text" id="roomId" placeholder="Enter or generate room ID" value="">
+                            <button class="secondary" onclick="generateRoomId()">🎲</button>
+                            <button class="secondary" onclick="copyRoomId()">📋</button>
+                        </div>
+                    </div>
+
+                    <button id="joinBtn" onclick="toggleConnection()">Join Network</button>
+                </div>
+
+                <!-- Generation Controls Card -->
+                <div class="card" style="margin-bottom: 1rem;">
+                    <h2>🎨 Generate Image</h2>
+                    
+                    <div class="form-group">
+                        <label>Prompt</label>
+                        <textarea id="prompt" placeholder="Describe the image you want to generate...">A beautiful landscape with mountains and a lake at sunset</textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Negative Prompt (optional)</label>
+                        <input type="text" id="negativePrompt" placeholder="What to avoid in the image...">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Model</label>
+                        <select id="modelSelect">
+                            <option value="prx-1024">PRX-1024 Beta (Photoroom)</option>
+                        </select>
+                    </div>
+
+                    <button id="generateBtn" onclick="startGeneration()" disabled>Generate Image</button>
+
+                    <div class="progress-container" id="progressContainer" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-bar-fill" id="progressFill" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-text">
+                            <span id="progressStage">Initializing...</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Peers Card -->
+                <div class="card">
+                    <h2>👥 Connected Peers</h2>
+                    <div class="peers-list" id="peersList">
+                        <p style="color: var(--text-muted); text-align: center; padding: 1rem;">
+                            No peers connected yet. Share your room ID to collaborate!
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Canvas & Queue -->
+            <div class="right-column">
+                <!-- Canvas Card -->
+                <div class="card" style="margin-bottom: 1rem;">
+                    <h2>🖼️ Generated Image</h2>
+                    <div class="canvas-container">
+                        <canvas id="canvas" width="1024" height="1024"></canvas>
+                    </div>
+                    <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                        <button class="secondary" onclick="downloadImage()" style="flex: 1;">📥 Download</button>
+                        <button class="secondary" onclick="shareImage()" style="flex: 1;">📤 Share</button>
+                    </div>
+                </div>
+
+                <!-- Queue Card -->
+                <div class="card" style="margin-bottom: 1rem;">
+                    <h2>📋 Generation Queue</h2>
+                    <div class="queue-list" id="queueList">
+                        <p style="color: var(--text-muted); text-align: center; padding: 1rem;">
+                            Queue is empty. Submit a prompt to start generating!
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Logs Card -->
+                <div class="card">
+                    <h2>📜 Activity Log</h2>
+                    <div class="log-container" id="logContainer">
+                        <div class="log-entry info">[System] P2P Diffusion initialized</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module">
+        import { P2PDiffusion } from './p2p-diffusion.js';
+        
+        // Initialize the P2P Diffusion app
+        window.p2pApp = new P2PDiffusion();
+        
+        // Expose functions for HTML onclick handlers
+        window.toggleConnection = () => window.p2pApp.toggleConnection();
+        window.startGeneration = () => window.p2pApp.startGeneration();
+        window.generateRoomId = () => window.p2pApp.generateRoomId();
+        window.copyRoomId = () => window.p2pApp.copyRoomId();
+        window.downloadImage = () => window.p2pApp.downloadImage();
+        window.shareImage = () => window.p2pApp.shareImage();
+    </script>
+</body>
+</html>
