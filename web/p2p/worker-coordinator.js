@@ -88,7 +88,16 @@ export class WorkerCoordinator {
      */
     async checkBackend(url = '/api/health') {
         try {
-            const response = await fetch(url, { method: 'GET', timeout: 5000 });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            
+            const response = await fetch(url, { 
+                method: 'GET', 
+                signal: controller.signal 
+            });
+            
+            clearTimeout(timeoutId);
+            
             if (response.ok) {
                 this.backendUrl = url.replace('/health', '');
                 this.backendAvailable = true;

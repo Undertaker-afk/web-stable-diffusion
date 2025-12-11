@@ -102,10 +102,16 @@ export class P2PDiffusion {
 
         for (const url of backendUrls) {
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000);
+                
                 const response = await fetch(url, { 
                     method: 'GET',
-                    signal: AbortSignal.timeout(3000)
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
+                
                 if (response.ok) {
                     this.backendAvailable = true;
                     this.elements.backendStatus.classList.remove('unavailable');
